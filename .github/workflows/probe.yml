@@ -1,17 +1,12 @@
-name: probe-shufersal
+name: probe-chains
 on:
   workflow_dispatch:
   push:
-    paths: ['.github/workflows/probe.yml']
+    paths: ['.github/workflows/probe.yml','tools/probe_chains.py']
 jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Try Shufersal
-        run: |
-          set -x
-          curl -sS -m 30 -o page.html -w "PAGE_STATUS=%{http_code}\n" https://prices.shufersal.co.il/ || echo PAGE_FAIL
-          ls -la page.html || true
-          LINK=$(grep -o 'https://pricesprodpublic[^"]*\.gz[^"]*' page.html | head -1 | sed 's/&amp;/\&/g')
-          echo "LINK_FOUND=${LINK:+yes}"
-          if [ -n "$LINK" ]; then curl -sS -m 60 -o f.gz -w "FILE_STATUS=%{http_code} SIZE=%{size_download}\n" "$LINK" || echo FILE_FAIL; gunzip -c f.gz | head -c 300; fi
+      - uses: actions/checkout@v4
+      - run: pip install requests
+      - run: python tools/probe_chains.py
