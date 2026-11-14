@@ -112,7 +112,7 @@ def parse_items(b):
         items[code] = {
             "price": price,
             "name": d.get("itemname", ""),
-            "brand": d.get("manufacturername", ""),
+            "brand": d.get("manufacturername", "") or d.get("manufacturename", ""),
             "qty": d.get("quantity", ""),
             "unit": d.get("unitofmeasure", ""),
         }
@@ -178,16 +178,19 @@ def load_localities():
 
 def locate_stores(stores):
     """Keep stores within radius. City-level pass first, then street-level for survivors."""
+    names = sorted({n for n in LOCALITIES.values() if len(n) >= 3}, key=len, reverse=True)
     for s in stores:
         if s["city"].isdigit() and int(s["city"]) in LOCALITIES:
             s["city"] = LOCALITIES[int(s["city"])]
+        if not s["city"] or s["city"].isdigit():
+            # city unknown in the file: look for a locality name inside the store name / address
+            text = f"{s['name']} {s['address']}"
+            s["city"] = next((n for n in names if n in text), "")
     near = []
     log("  sample stores:", [(s["city"], s["address"]) for s in stores[:4]])
     for s in stores:
         city = s["city"] or ""
         c = geocode(f"{city}, ישראל") if city and not city.isdigit() else None
-        if c is None and not city and s["address"]:
-            c = geocode(f"{s['address']}, ישראל")
         if c is None:
             s["_skip"] = "nogeo"
             continue
