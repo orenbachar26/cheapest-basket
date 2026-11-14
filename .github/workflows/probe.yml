@@ -1,0 +1,12 @@
+name: probe-localities
+on:
+  workflow_dispatch:
+  push:
+    paths: ['tools/find_localities.py']
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install requests
+      - run: python tools/find_localities.py
