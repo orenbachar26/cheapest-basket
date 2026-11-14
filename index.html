@@ -95,7 +95,10 @@ async function load(){
     const [stores,items,prices,meta]=await Promise.all(["stores","items","prices","meta"].map(n=>fetch("data/"+n+".json").then(r=>{if(!r.ok)throw 0;return r.json()})));
     const index=Object.entries(items).map(([code,[name,brand,qty,unit]])=>({code,name,brand,qty,unit,
       text:norm(name+" "+brand),nameN:norm(name),brandN:norm(brand),n:(prices[code]||[]).length/2}));
-    DATA={stores,items,prices,meta,index};
+    const bw={}; index.forEach(it=>it.brandN.split(" ").forEach(w=>{if(w.length>=3)bw[w]=(bw[w]||0)+1}));
+    const generic=new Set(["לא","ידוע","בע","מ","ישראל","יבוא","ייצור","מזון","חברה","תעשיות","מוצרי","קבוצת","קבוצה"]);
+    const brandWords=new Set(Object.keys(bw).filter(w=>bw[w]>=3&&!generic.has(w)));
+    DATA={stores,items,prices,meta,index,brandWords};
     $("upd").textContent="מחירים מעודכנים: "+heb.format(new Date(meta.updated))+" · "+meta.stores+" סניפים";
     $("load").textContent=""; $("go").disabled=false;
   }catch(e){$("load").textContent="לא הצלחתי לטעון את המחירים. נסה לרענן את הדף.";}
@@ -122,25 +125,32 @@ function candidates(tokens){
       if(i<0){ok=false;break}
       score+= (i===0||it.text[i-1]===" ")?2:1;
     }
-    if(ok) res.push({it,score});
+    if(ok){ if(it.nameN.startsWith(tokens[0])) score+=4; res.push({it,score}); }
   }
   res.sort((a,b)=>b.score-a.score||b.it.n-a.it.n);
+  res.forEach(x=>x.it.score=x.score);
   return res.map(x=>x.it);
 }
 function brandMentioned(tokens,cands){
-  // a brand is mentioned if some query token matches the manufacturer of the matching products
-  const brands=new Set(cands.slice(0,200).map(c=>c.brandN).filter(b=>b&&b!=="לא ידוע"));
-  for(const t of tokens){ if(t.length<3) continue; for(const b of brands){ if(b.split(" ").some(w=>w.startsWith(t))) return true } }
+  // a brand is mentioned if a query word (not the first one) is a known manufacturer name
+  // and at least one matching product is made by it
+  for(const t of tokens.slice(1)){
+    if(t.length<3||!DATA.brandWords.has(t)) continue;
+    if(cands.some(c=>c.brandN.split(" ").includes(t))) return true;
+  }
   return false;
 }
-function sizeKey(it){return (it.qty||"")+"|"+(it.unit||"")}
+function sizeKey(it){return (parseFloat(it.qty)||"")+"|"+cleanUnit(it.unit)}
 function sameSizePool(cands){
   // "any brand" = products sharing the most common package size among the top matches
-  const cnt={}; cands.slice(0,40).forEach(c=>{const k=sizeKey(c);cnt[k]=(cnt[k]||0)+c.n});
+  const top=cands.filter(c=>c.score>=cands[0].score-2&&c.n>=3);
+  const base=top.length?top:cands;
+  const cnt={}; base.slice(0,60).forEach(c=>{const k=sizeKey(c);cnt[k]=(cnt[k]||0)+c.n});
   const best=Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0]?.[0];
-  return {pool:cands.filter(c=>sizeKey(c)===best).slice(0,60),size:best};
+  return {pool:base.filter(c=>sizeKey(c)===best).slice(0,60),size:best};
 }
-const sizeText=it=>{const q=parseFloat(it.qty);return (q&&it.unit&&q!==1?q+" ":"")+(it.unit||"").trim()};
+const cleanUnit=u=>(u||"").replace(/^[\d.]+\s*/,"").trim();
+const sizeText=it=>{const q=parseFloat(it.qty),u=cleanUnit(it.unit);return ((q&&q!==1?q+" ":"")+u).trim()};
 
 // ---------- wizard
 let lines=[],qi=0,chosen=[];
@@ -219,7 +229,7 @@ function results(){
     <div class="price">${money(r.total)}</div></div>
     <details><summary class="mute" style="margin-top:6px;cursor:pointer">פירוט</summary><table>${r.lines.map(l=>`<tr><td>${l.qty>1?l.qty+"× ":""}${esc(l.name)}<div class="mute">${esc(l.brand)}</div></td><td class="n">${money(l.sub)}</td></tr>`).join("")}</table>
     ${r.missing.length?`<p class="mute">חסר בסניף: ${esc(r.missing.join(", "))}</p>`:""}
-    <a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${r.s.s?r.s.s:r.s.lat},${r.s.lng}">ניווט ↗</a></details></div>`;
+    <a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${r.s.lat},${r.s.lng}">ניווט ↗</a></details></div>`;
   h+=full.slice(0,15).map((r,i)=>card(r,i,true)).join("");
   if(part.length) h+=`<div class="card"><h2>סניפים שחסרים בהם פריטים</h2><div class="mute">המחיר מוצג רק על מה שנמצא, לכן אין להשוות אותו ישירות.</div></div>`+part.slice(0,8).map((r,i)=>card(r,i,false)).join("");
   h+=`<p class="mute" style="font-size:.85rem">המחירים לפי קבצי שקיפות המחירים שהרשתות מחויבות לפרסם. מחירי מדף בלבד, בלי מבצעים ובלי פירות וירקות במשקל. ייתכנו הבדלים בקופה.</p>`;
