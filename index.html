@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>הסל הזול</title>
+<style>
+:root{--bg:#f6f7f4;--card:#fff;--ink:#1f2933;--mute:#6b7280;--brand:#0f766e;--brand2:#115e59;--line:#e5e7eb;--good:#15803d;--warn:#b45309}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,"Segoe UI",Arial,sans-serif;background:var(--bg);color:var(--ink);line-height:1.45}
+header{background:var(--brand);color:#fff;padding:14px 16px;position:sticky;top:0;z-index:5}
+header h1{margin:0;font-size:1.2rem}
+header small{opacity:.85}
+main{max-width:760px;margin:0 auto;padding:12px 12px 80px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:12px 0}
+.card h2{margin:0 0 8px;font-size:1.05rem}
+textarea{width:100%;min-height:150px;font:inherit;padding:10px;border:1px solid var(--line);border-radius:10px;resize:vertical}
+button,.btn{font:inherit;border:0;border-radius:10px;padding:11px 14px;background:var(--brand);color:#fff;cursor:pointer;min-height:44px}
+button.sec{background:#e6f0ee;color:var(--brand2)}
+button:disabled{opacity:.5}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.opt{display:block;width:100%;text-align:right;background:#fff;color:var(--ink);border:1px solid var(--line);margin:6px 0;padding:10px 12px}
+.opt.first{border-color:var(--brand);background:#ecf7f5}
+.opt small{display:block;color:var(--mute)}
+.store{border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0;background:#fff}
+.store.best{border:2px solid var(--good)}
+.store .top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.price{font-size:1.4rem;font-weight:700;white-space:nowrap}
+.tag{display:inline-block;font-size:.8rem;padding:2px 8px;border-radius:99px;background:#e6f0ee;color:var(--brand2)}
+.tag.warn{background:#fef3c7;color:var(--warn)}
+.tag.good{background:#dcfce7;color:var(--good)}
+table{width:100%;border-collapse:collapse;font-size:.92rem;margin-top:8px}
+td{padding:4px 2px;border-bottom:1px solid var(--line);vertical-align:top}
+td.n{text-align:left;white-space:nowrap}
+.mute{color:var(--mute)}
+a{color:var(--brand2)}
+label{font-size:.9rem}
+input[type=range]{width:100%}
+.progress{height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden;margin:8px 0}
+.progress>i{display:block;height:100%;background:var(--brand)}
+</style>
+</head>
+<body>
+<header><h1>🛒 הסל הזול</h1><small id="upd">טוען נתונים…</small></header>
+<main>
+
+<section id="s-list" class="card">
+  <h2>רשימת הקניות שלי</h2>
+  <p class="mute" style="margin:0 0 8px">שורה לכל פריט. אפשר לכתוב כמות לפני השם (למשל: 2 חלב 3%). אם לא כתבת מותג, אשאל אותך.</p>
+  <textarea id="list" placeholder="חלב 3%&#10;2 ביצים&#10;קוטג' תנובה&#10;אורז"></textarea>
+  <div class="row" style="margin-top:8px">
+    <label class="btn sec" style="display:inline-flex;align-items:center">העלאת קובץ רשימה<input id="file" type="file" accept=".txt,.csv,text/plain" hidden></label>
+  </div>
+  <h2 style="margin-top:16px">איפה אני?</h2>
+  <div class="row">
+    <button id="gps" class="sec" type="button">📍 השתמש במיקום שלי</button>
+    <span id="loc" class="mute">ברירת מחדל: גדרה</span>
+  </div>
+  <label style="display:block;margin-top:10px">טווח חיפוש: <b id="rv">15</b> ק״מ
+    <input id="radius" type="range" min="3" max="40" value="15"></label>
+  <div class="row" style="margin-top:10px"><button id="go" type="button" disabled>מצא את הסל הזול ←</button></div>
+  <div id="load" class="mute"></div>
+</section>
+
+<section id="s-ask" class="card" hidden></section>
+<section id="s-res" hidden></section>
+</main>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+let DATA=null, here={lat:31.812,lng:34.779,label:"גדרה"};
+
+// ---------- text helpers
+const norm=s=>(s||"").toLowerCase().replace(/[֑-ׇ]/g,"").replace(/["'״׳`´]/g,"").replace(/[^\p{L}\p{N}%.]+/gu," ").trim();
+function parseLine(raw){
+  let t=raw.trim(); if(!t) return null;
+  let qty=1, m=t.match(/^(\d+)\s*[x×*]?\s+(.*)$/i) || t.match(/^(.*?)\s*[x×*]\s*(\d+)$/i);
+  if(m){ if(/^\d+$/.test(m[1])){qty=+m[1];t=m[2]} else {qty=+m[2];t=m[1]} }
+  return {raw:t,qty:Math.max(1,qty),tokens:norm(t).split(" ").filter(Boolean)};
+}
+const dist=(a,b)=>{const R=6371,r=x=>x*Math.PI/180,dp=r(b.lat-a.lat),dl=r(b.lng-a.lng);
+  const h=Math.sin(dp/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dl/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
+const money=n=>"₪"+n.toFixed(2);
+const heb=new Intl.DateTimeFormat("he-IL",{dateStyle:"medium",timeStyle:"short"});
+
+// ---------- data
+async function load(){
+  try{
+    $("load").textContent="טוען מחירים…";
+    const [stores,items,prices,meta]=await Promise.all(["stores","items","prices","meta"].map(n=>fetch("data/"+n+".json").then(r=>{if(!r.ok)throw 0;return r.json()})));
+    const index=Object.entries(items).map(([code,[name,brand,qty,unit]])=>({code,name,brand,qty,unit,
+      text:norm(name+" "+brand),nameN:norm(name),brandN:norm(brand),n:(prices[code]||[]).length/2}));
+    DATA={stores,items,prices,meta,index};
+    $("upd").textContent="מחירים מעודכנים: "+heb.format(new Date(meta.updated))+" · "+meta.stores+" סניפים";
+    $("load").textContent=""; $("go").disabled=false;
+  }catch(e){$("load").textContent="לא הצלחתי לטעון את המחירים. נסה לרענן את הדף.";}
+}
+const saved=store.get("list"); if(saved) $("list").value=saved;
+$("radius").oninput=e=>$("rv").textContent=e.target.value;
+$("file").onchange=async e=>{const f=e.target.files[0]; if(f){$("list").value=(await f.text()).replace(/,/g,"\n")}};
+$("gps").onclick=()=>{
+  if(!navigator.geolocation){$("loc").textContent="המכשיר לא תומך במיקום";return}
+  $("loc").textContent="מאתר…";
+  navigator.geolocation.getCurrentPosition(p=>{here={lat:p.coords.latitude,lng:p.coords.longitude,label:"המיקום שלי"};$("loc").textContent="המיקום שלי ✓"},
+    ()=>{$("loc").textContent="לא קיבלתי הרשאה, נשארתי עם גדרה"},{timeout:15000});
+};
+
+// ---------- matching
+function candidates(tokens){
+  if(!tokens.length) return [];
+  const res=[];
+  for(const it of DATA.index){
+    if(it.n<2 && false) continue;
+    let ok=true,score=0;
+    for(const t of tokens){
+      const i=it.text.indexOf(t);
+      if(i<0){ok=false;break}
+      score+= (i===0||it.text[i-1]===" ")?2:1;
+    }
+    if(ok) res.push({it,score});
+  }
+  res.sort((a,b)=>b.score-a.score||b.it.n-a.it.n);
+  return res.map(x=>x.it);
+}
+function brandMentioned(tokens,cands){
+  // a brand is mentioned if some query token matches the manufacturer of the matching products
+  const brands=new Set(cands.slice(0,200).map(c=>c.brandN).filter(b=>b&&b!=="לא ידוע"));
+  for(const t of tokens){ if(t.length<3) continue; for(const b of brands){ if(b.split(" ").some(w=>w.startsWith(t))) return true } }
+  return false;
+}
+function sizeKey(it){return (it.qty||"")+"|"+(it.unit||"")}
+function sameSizePool(cands){
+  // "any brand" = products sharing the most common package size among the top matches
+  const cnt={}; cands.slice(0,40).forEach(c=>{const k=sizeKey(c);cnt[k]=(cnt[k]||0)+c.n});
+  const best=Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0]?.[0];
+  return {pool:cands.filter(c=>sizeKey(c)===best).slice(0,60),size:best};
+}
+const sizeText=it=>{const q=parseFloat(it.qty);return (q&&it.unit&&q!==1?q+" ":"")+(it.unit||"").trim()};
+
+// ---------- wizard
+let lines=[],qi=0,chosen=[];
+$("go").onclick=()=>{
+  store.set("list",$("list").value);
+  lines=$("list").value.split("\n").map(parseLine).filter(Boolean);
+  if(!lines.length){alert("הרשימה ריקה");return}
+  chosen=[];qi=0;next();
+};
+function next(){
+  while(qi<lines.length){
+    const L=lines[qi], c=candidates(L.tokens);
+    if(!c.length){chosen.push({line:L,codes:[],missing:true});qi++;continue}
+    if(brandMentioned(L.tokens,c)){chosen.push({line:L,codes:c.slice(0,60).map(x=>x.code),label:L.raw});qi++;continue}
+    return ask(L,c);
+  }
+  results();
+}
+function ask(L,c){
+  $("s-res").hidden=true; const box=$("s-ask"); box.hidden=false;
+  const {pool,size}=sameSizePool(c);
+  const top=c.slice(0,8);
+  let h=`<div class="mute">פריט ${qi+1} מתוך ${lines.length}</div><div class="progress"><i style="width:${(qi/lines.length)*100}%"></i></div>
+  <h2>“${esc(L.raw)}” — איזה מותג?</h2>`;
+  h+=`<button class="opt first" data-k="any">הכי זול מכל המותגים<small>${esc(sizeText(pool[0]||c[0])||"")} · ${pool.length} מוצרים</small></button>`;
+  top.forEach((it,i)=>h+=`<button class="opt" data-k="${i}">${esc(it.name)}<small>${esc(it.brand)} · ${esc(sizeText(it))} · ב-${Math.round(it.n)} סניפים</small></button>`);
+  h+=`<button class="opt" data-k="skip" style="color:var(--mute)">דלג על הפריט</button>`;
+  box.innerHTML=h;
+  box.querySelectorAll("button").forEach(b=>b.onclick=()=>{
+    const k=b.dataset.k;
+    if(k==="any") chosen.push({line:L,codes:pool.map(x=>x.code),label:L.raw+" (כל מותג)"});
+    else if(k==="skip") chosen.push({line:L,codes:[],skipped:true});
+    else chosen.push({line:L,codes:[top[+k].code],label:top[+k].name});
+    qi++;next();
+  });
+  box.scrollIntoView({behavior:"smooth",block:"start"});
+}
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// ---------- compute
+function results(){
+  $("s-ask").hidden=true;
+  const R=+$("radius").value;
+  const near=DATA.stores.map((s,i)=>({s,i,d:dist(here,s)})).filter(x=>x.d<=R);
+  const used=chosen.filter(c=>c.codes.length);
+  // per store price lookup
+  const rows=near.map(({s,i,d})=>({s,d,i,lines:[],total:0,missing:[]}));
+  const byIdx=new Map(rows.map(r=>[r.i,r]));
+  for(const c of used){
+    const best=new Map(); // store idx -> {price,code}
+    for(const code of c.codes){
+      const p=DATA.prices[code]; if(!p) continue;
+      for(let k=0;k<p.length;k+=2){
+        const r=byIdx.get(p[k]); if(!r) continue;
+        const cur=best.get(p[k]); if(!cur||p[k+1]<cur.price) best.set(p[k],{price:p[k+1],code});
+      }
+    }
+    for(const r of rows){
+      const b=best.get(r.i);
+      if(b){const it=DATA.items[b.code];const sub=b.price*c.line.qty;r.total+=sub;r.lines.push({name:it[0],brand:it[1],qty:c.line.qty,unit:b.price,sub});}
+      else r.missing.push(c.label||c.line.raw);
+    }
+  }
+  const full=rows.filter(r=>!r.missing.length).sort((a,b)=>a.total-b.total);
+  const part=rows.filter(r=>r.missing.length&&r.lines.length).sort((a,b)=>a.missing.length-b.missing.length||a.total-b.total);
+  const skipped=chosen.filter(c=>c.skipped).length, notFound=chosen.filter(c=>c.missing).map(c=>c.line.raw);
+  let h=`<div class="card"><h2>התוצאות</h2><div class="mute">${used.length} פריטים בהשוואה · עד ${R} ק״מ מ${esc(here.label)}</div>`;
+  if(notFound.length) h+=`<p class="tag warn">לא נמצאו: ${esc(notFound.join(", "))}</p>`;
+  if(!used.length) h+=`<p>לא נמצא אף פריט להשוואה.</p>`;
+  else if(!full.length&&!part.length) h+=`<p>אין סניפים בטווח שמוכרים את הפריטים. נסה להגדיל את הטווח.</p>`;
+  h+=`<button class="sec" id="again" type="button">← חזרה לרשימה</button></div>`;
+  const cheapest=full[0]?.total;
+  const card=(r,i,isFull)=>`<div class="store ${isFull&&i===0?"best":""}">
+    <div class="top"><div><b>${esc(r.s.chain)}</b> · ${esc(r.s.name)}<div class="mute">${esc(r.s.address)}, ${esc(r.s.city)} · ${r.d.toFixed(1)} ק״מ</div>
+    ${isFull?(i===0?'<span class="tag good">הכי זול</span>':'<span class="tag">+'+money(r.total-cheapest)+'</span>'):'<span class="tag warn">חסרים '+r.missing.length+' פריטים</span>'}</div>
+    <div class="price">${money(r.total)}</div></div>
+    <details><summary class="mute" style="margin-top:6px;cursor:pointer">פירוט</summary><table>${r.lines.map(l=>`<tr><td>${l.qty>1?l.qty+"× ":""}${esc(l.name)}<div class="mute">${esc(l.brand)}</div></td><td class="n">${money(l.sub)}</td></tr>`).join("")}</table>
+    ${r.missing.length?`<p class="mute">חסר בסניף: ${esc(r.missing.join(", "))}</p>`:""}
+    <a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${r.s.s?r.s.s:r.s.lat},${r.s.lng}">ניווט ↗</a></details></div>`;
+  h+=full.slice(0,15).map((r,i)=>card(r,i,true)).join("");
+  if(part.length) h+=`<div class="card"><h2>סניפים שחסרים בהם פריטים</h2><div class="mute">המחיר מוצג רק על מה שנמצא, לכן אין להשוות אותו ישירות.</div></div>`+part.slice(0,8).map((r,i)=>card(r,i,false)).join("");
+  h+=`<p class="mute" style="font-size:.85rem">המחירים לפי קבצי שקיפות המחירים שהרשתות מחויבות לפרסם. מחירי מדף בלבד, בלי מבצעים ובלי פירות וירקות במשקל. ייתכנו הבדלים בקופה.</p>`;
+  const el=$("s-res"); el.innerHTML=h; el.hidden=false; $("again").onclick=()=>{el.hidden=true;window.scrollTo({top:0,behavior:"smooth"})};
+  el.scrollIntoView({behavior:"smooth"});
+}
+load();
+</script>
+</body>
+</html>
