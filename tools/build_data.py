@@ -146,13 +146,46 @@ def geocode(q):
     return res
 
 
+LOCALITIES = {}
+
+
+def load_localities():
+    """CBS locality code -> Hebrew name (stores files carry only the numeric code)."""
+    try:
+        recs, offset = [], 0
+        while True:
+            r = requests.get("https://data.gov.il/api/3/action/datastore_search",
+                             params={"resource_id": "5c78e9fa-c2e2-4771-93ff-7f400a12f7ba", "limit": 1000, "offset": offset},
+                             headers=UA, timeout=60)
+            part = r.json()["result"]["records"]
+            if not part:
+                break
+            recs += part
+            offset += len(part)
+        sample = recs[0] if recs else {}
+        log("localities fields:", list(sample.keys()))
+        code_k = next((k for k in sample if "סמל" in k), None)
+        name_k = next((k for k in sample if "שם" in k and "אנגל" not in k and "english" not in k.lower()), None)
+        for x in recs:
+            try:
+                LOCALITIES[int(str(x[code_k]).strip())] = re.sub(r"\s+", " ", str(x[name_k])).strip()
+            except Exception:
+                pass
+        log("localities loaded:", len(LOCALITIES), "e.g.", [(k, LOCALITIES[k]) for k in list(LOCALITIES)[:3]])
+    except Exception as e:
+        log("localities FAILED", type(e).__name__, str(e)[:120])
+
+
 def locate_stores(stores):
     """Keep stores within radius. City-level pass first, then street-level for survivors."""
+    for s in stores:
+        if s["city"].isdigit() and int(s["city"]) in LOCALITIES:
+            s["city"] = LOCALITIES[int(s["city"])]
     near = []
     for s in stores:
         city = s["city"] or ""
         c = geocode(f"{city}, ישראל") if city and not city.isdigit() else None
-        if c is None and s["address"]:
+        if c is None and not city and s["address"]:
             c = geocode(f"{s['address']}, ישראל")
         if c is None:
             s["_skip"] = "nogeo"
@@ -164,7 +197,7 @@ def locate_stores(stores):
     for s in near:
         if s["address"] and s["city"] and not s["city"].isdigit():
             c = geocode(f"{s['address']}, {s['city']}, ישראל")
-            if c:
+            if c and haversine((s["lat"], s["lng"]), c) <= 15:  # ignore street hits far from the city
                 s["lat"], s["lng"] = c
         if haversine(CENTER, (s["lat"], s["lng"])) <= RADIUS_KM:
             final.append(s)
@@ -295,6 +328,7 @@ def run_shufersal():
 
 # ---------------------------------------------------------------- main
 def main():
+    load_localities()
     chains = {}
     try:
         r = run_shufersal()
