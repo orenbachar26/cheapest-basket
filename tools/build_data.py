@@ -182,6 +182,7 @@ def locate_stores(stores):
         if s["city"].isdigit() and int(s["city"]) in LOCALITIES:
             s["city"] = LOCALITIES[int(s["city"])]
     near = []
+    log("  sample stores:", [(s["city"], s["address"]) for s in stores[:4]])
     for s in stores:
         city = s["city"] or ""
         c = geocode(f"{city}, ישראל") if city and not city.isdigit() else None
@@ -193,6 +194,7 @@ def locate_stores(stores):
         if haversine(CENTER, c) <= RADIUS_KM + 8:
             s["lat"], s["lng"] = c
             near.append(s)
+    log("  nogeo:", sum(1 for s in stores if s.get("_skip")), "of", len(stores), "| within margin:", len(near))
     final = []
     for s in near:
         if s["address"] and s["city"] and not s["city"].isdigit():
