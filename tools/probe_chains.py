@@ -1,19 +1,29 @@
-import re, requests
+import re, requests, gzip, io, zipfile
 BASE = "https://url.publishedprices.co.il"
-s = requests.Session(); s.headers["User-Agent"] = "Mozilla/5.0"
-r = s.get(BASE + "/login", timeout=30)
-print("LOGIN_PAGE", r.status_code, len(r.text))
-for m in re.finditer(r'<(?:meta|input)[^>]*csrf[^>]*>', r.text, re.I): print("CSRF_TAG", m.group(0)[:200])
-m = re.search(r'csrftoken[^>]*?(?:content|value)="([^"]+)"', r.text, re.I) or re.search(r'(?:content|value)="([^"]+)"[^>]*csrftoken', r.text, re.I)
-tok = m.group(1) if m else ""
-print("TOKEN_LEN", len(tok))
-r2 = s.post(BASE + "/login/user", data={"username":"RamiLevi","password":"","Submit":"Sign in","csrftoken":tok}, timeout=30)
-print("POST", r2.status_code, r2.url)
-print("POST_BODY", re.sub(r'\s+',' ', re.sub(r'<script.*?</script>','',r2.text, flags=re.S))[:400])
-r3 = s.get(BASE + "/file", timeout=30)
-print("FILE_PAGE", r3.status_code, r3.url)
-print("FILE_BODY", re.sub(r'\s+',' ', re.sub(r'<script.*?</script>','',r3.text, flags=re.S))[:400])
-for host in ["https://prices.carrefour.co.il/", "https://prices.mega.co.il/"]:
+def head(b, n=700):
     try:
-        x = requests.get(host, timeout=40, headers={"User-Agent":"Mozilla/5.0"}); print("HOST", host, x.status_code, len(x.text))
-    except Exception as e: print("HOST", host, "ERROR", type(e).__name__)
+        if b[:2] == b'\x1f\x8b': b = gzip.decompress(b)
+        elif b[:2] == b'PK': z = zipfile.ZipFile(io.BytesIO(b)); b = z.read(z.namelist()[0])
+        return b.decode('utf-8-sig', 'replace')[:n]
+    except Exception as e: return "ERR "+str(e)
+for user in ["RamiLevi","yohananof","osherad","Victory"]:
+    print("#####", user)
+    s = requests.Session(); s.headers["User-Agent"] = "Mozilla/5.0"
+    r = s.get(BASE+"/login", timeout=30)
+    tok = re.search(r'name="csrftoken" content="([^"]+)"', r.text).group(1)
+    r2 = s.post(BASE+"/login/user", data={"username":user,"password":"","Submit":"Sign in","csrftoken":tok}, timeout=30)
+    tok = re.search(r'name="csrftoken" content="([^"]+)"', r2.text)
+    tok = tok.group(1) if tok else ""
+    print("landed", r2.url)
+    r3 = s.post(BASE+"/file/json/dir", data={"sEcho":1,"iColumns":5,"sColumns":",,,,","iDisplayStart":0,"iDisplayLength":100000,"mDataProp_0":"fname","mDataProp_1":"typeLabel","mDataProp_2":"size","mDataProp_3":"ftime","mDataProp_4":"","sSearch":"","bRegex":"false","iSortingCols":0,"cd":"/","csrftoken":tok}, timeout=60)
+    print("dir", r3.status_code, r3.text[:200].replace("\n"," "))
+    try: rows = r3.json().get("aaData", [])
+    except Exception: rows = []
+    names = [x.get("fname") if isinstance(x, dict) else x[0] for x in rows]
+    print("files", len(names), names[:6])
+    for pref in ["Stores", "PriceFull"]:
+        cand = [n for n in names if n and n.startswith(pref)]
+        print(pref, len(cand), cand[:2])
+        if cand:
+            d = s.get(BASE+"/file/d/"+cand[0], timeout=120)
+            print("  dl", d.status_code, len(d.content)); print(head(d.content))
