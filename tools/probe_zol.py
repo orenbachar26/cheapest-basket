@@ -1,19 +1,26 @@
-import re, requests
+import re, json, requests, gzip, collections
 H={"User-Agent":"Mozilla/5.0"}
-print("== Bina portals")
-for host in ["zolvebegadol","kingstore","maayan2000","shefabirkathashem","hazihinam","victory"]:
-    for path in ["/", "/MainIO_Hok.aspx"]:
-        u=f"https://{host}.binaprojects.com{path}"
+host="https://zolvebegadol.binaprojects.com"
+r=requests.get(host+"/MainIO_Hok.aspx",headers=H,timeout=60)
+rows=r.json()
+print("ROWS",len(rows)); print("KEYS",list(rows[0].keys()))
+print("TYPES",collections.Counter(x["TypeFile"] for x in rows))
+pref=collections.Counter(re.match(r"[A-Za-z]+",x["FileNm"]).group(0) for x in rows); print("PREFIX",pref)
+for x in rows[:3]: print("SAMPLE",x)
+st=[x for x in rows if x["FileNm"].lower().startswith("stores")]
+pf=[x for x in rows if x["FileNm"].lower().startswith("pricefull")]
+print("stores files",len(st),"pricefull files",len(pf))
+for kind,lst in (("STORES",st),("PRICEFULL",pf)):
+    if not lst: continue
+    n=lst[0]["FileNm"]
+    for u in [f"{host}/Download.aspx?FileNm={n}", f"{host}/Download/{n}", f"{host}/{n}"]:
         try:
-            r=requests.get(u,headers=H,timeout=30)
-            print("BINA",u,r.status_code,len(r.text),re.sub(r"\s+"," ",r.text[:160]))
-        except Exception as e: print("BINA",u,"ERR",type(e).__name__)
-print("== Cerberus usernames")
-B="https://url.publishedprices.co.il"
-for user in ["ZolVebegadol","zolvebegadol","ZolVeBegadol","Zol_Vebegadol","zol","ZolBegadol","Zol","zolbegadol","zolvbegadol","ZOL_VEBEGADOL","Hazi_Hinam","hazihinam","Victory","victory","VictoryRetail"]:
-    try:
-        s=requests.Session();s.headers.update(H)
-        r=s.get(B+"/login",timeout=30);tok=re.search(r'name="csrftoken" content="([^"]+)"',r.text).group(1)
-        r2=s.post(B+"/login/user",data={"username":user,"password":"","Submit":"Sign in","csrftoken":tok},timeout=30)
-        print("CERB",user,"OK" if r2.url.rstrip("/").endswith("/file") else "no")
-    except Exception as e: print("CERB",user,"ERR",type(e).__name__)
+            d=requests.get(u,headers=H,timeout=90)
+            print("DL",kind,u,d.status_code,len(d.content),d.headers.get("content-type"))
+            if d.status_code==200 and len(d.content)>100:
+                b=d.content
+                try:
+                    if b[:2]==b"\x1f\x8b": b=gzip.decompress(b)
+                except Exception as e: print("gunzip err",e)
+                print(b.decode("utf-8-sig","replace")[:600]); break
+        except Exception as e: print("DL ERR",u,type(e).__name__)
