@@ -19,13 +19,19 @@ CERBERUS_CHAINS = {  # login user -> display name
     "yohananof": "יוחננוף",
     "osherad": "אושר עד",
     "TivTaam": "טיב טעם",
-    "HaziHinam": "חצי חינם",
+    "hazihinam": "חצי חינם",
     "Keshet": "קשת טעמים",
     "Stop_Market": "סטופ מרקט",
     "politzer": "פוליצר",
     "freshmarket": "פרשמרקט",
     "Victory": "ויקטורי",
     "SalachD": "סאלח דבאח",
+}
+BINA_CHAINS = {  # binaprojects.com sub-domain -> display name
+    "zolvebegadol": "זול ובגדול",
+    "kingstore": "קינג סטור",
+    "maayan2000": "מעיין 2000",
+    "shefabirkathashem": "שפע ברכת השם",
 }
 SHUFERSAL = "https://prices.shufersal.co.il"
 LIMIT_STORES_PER_CHAIN = int(os.environ.get("LIMIT_STORES_PER_CHAIN", "0"))  # 0 = no limit (testing aid)
@@ -278,6 +284,46 @@ def run_cerberus(user, display):
     return result
 
 
+def run_bina(sub_domain, display):
+    host = f"https://{sub_domain}.binaprojects.com"
+    s = requests.Session()
+    s.headers.update(UA)
+    rows = s.get(host + "/MainIO_Hok.aspx", timeout=90).json()
+    names = [x["FileNm"] for x in rows]
+    store_files = sorted(n for n in names if n.lower().startswith("stores"))
+    if not store_files:
+        log(f"[{display}] no stores file")
+        return None
+
+    def fetch(name):
+        j = s.get(host + "/Download.aspx", params={"FileNm": name}, timeout=90).json()
+        return s.get(j[0]["SPath"], timeout=180).content
+
+    stores = parse_stores(fetch(store_files[-1]))
+    latest = {}
+    for n in names:
+        m = re.match(r"PriceFull(\d+)-(\d+)-(\d+)-(\d{8})-(\d{6})", n, re.I)
+        if m:
+            key = int(m.group(3))
+            if key not in latest or n > latest[key]:
+                latest[key] = n
+    stores = [st for st in stores if st["id"].isdigit() and int(st["id"]) in latest]
+    near = locate_stores(stores)
+    if LIMIT_STORES_PER_CHAIN:
+        near = near[:LIMIT_STORES_PER_CHAIN]
+    log(f"[{display}] stores={len(stores)} near={len(near)}")
+    result = []
+    for st in near:
+        try:
+            items = parse_items(fetch(latest[int(st["id"])]))
+        except Exception as e:
+            log(f"[{display}] store {st['id']} error {type(e).__name__}")
+            continue
+        if items:
+            result.append((st, items))
+    return result
+
+
 def run_shufersal():
     display = "שופרסל"
     sess = requests.Session()
@@ -341,6 +387,14 @@ def main():
             chains["שופרסל"] = r
     except Exception as e:
         log("[שופרסל] FAILED", type(e).__name__, str(e)[:200])
+    for sub_domain, display in BINA_CHAINS.items():
+        try:
+            r = run_bina(sub_domain, display)
+            if r:
+                chains[display] = r
+        except Exception as e:
+            log(f"[{display}] FAILED", type(e).__name__, str(e)[:200])
+        json.dump(geocache, open(GEOCACHE_PATH, "w", encoding="utf-8"), ensure_ascii=False)
     for user, display in CERBERUS_CHAINS.items():
         try:
             r = run_cerberus(user, display)
